@@ -37,7 +37,7 @@ EXECUTOR (AI Agent or Human) MUST follow this protocol whenever the repository c
 
 ## [4] GATE_POLICY
 
-- **AI agents: strict from day one.** An agent MUST NOT change code that no module document's `sources:` covers; it MUST first create a `draft` via [2].3. An agent MUST NOT commit while `check` reports errors.
+- **AI agents: strict from day one.** An agent MUST NOT change code that no module document's `sources:` covers; it MUST first create a `draft` via [2].3. An agent MUST NOT commit while `check --gate --staged` reports errors; code staged under an `active` document requires that document in the same commit.
 - **Humans: `gate: warn`** until the team decides coverage is sufficient, then `gate: strict`. In warn mode the pre-commit hook prints the errors and lets the commit through.
 - **`check --sync` (warning only):** lists documents whose `sources:` files changed in the working tree while the document itself did not. Use it to spot drift; it never blocks.
 

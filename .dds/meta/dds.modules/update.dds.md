@@ -77,6 +77,8 @@ IF the module update alters a Database Schema requirement or a Global API Contra
 
 **FINAL_CHECK:** RUN `python .dds/meta/scripts/dds.py check` after the lock is released ([4] ACTION 1). IF it fails, fix the reported errors before reporting `SYNC_COMPLETE`.
 
+**STAGING RULE:** The commit hooks run `check --gate --staged`. Code staged under this document's `sources:` while this document is not staged fails the gate. EXECUTOR stages the document change with the code, or asks the human when the code change needs no document change and the human decides to commit under `gate: warn`. A `DDS-No-Doc: <reason>` trailer in the commit message records that decision for CI-era range checks; it does not open the gate.
+
 *Output: EXECUTOR returns `STATUS: SYNC_COMPLETE` ONLY IF all locks are released and cross-domain dependencies are resolved.*
 
 # END_OF_DIRECTIVE

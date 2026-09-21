@@ -108,6 +108,7 @@ AFTER generating the document content and BEFORE saving or committing, EXECUTOR 
 1. **Scan for Referents:** Does any pronoun refer to a subject named outside its section? -> IF YES, name the subject in that section.
 2. **Scan for Header Depth:** Are there any `####` or deeper headers? -> IF YES, flatten to `###` and use lists or bold text instead.
 3. **Scan for Contextless Headers:** Do all `##` and `###` headers explicitly contain the module/feature name? -> IF NO, append the context.
+4. **Scan for content and sources:** Does every required section hold content, and does every `sources:` glob match at least one file? -> IF NO, the document stays `draft`; `check` rejects an `active` document that fails either.
 
 **FINAL_CHECK:** RUN `python .dds/meta/scripts/dds.py check` on the saved files. IF it fails, fix the reported errors.
 

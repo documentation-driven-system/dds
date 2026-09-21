@@ -17,7 +17,7 @@ Not to be confused with the OMG Data Distribution Service, which shares the acro
 | Three tiers of documents | `.dds/product/`, `.dds/architecture/`, `.dds/modules/` | Why the system exists, where it runs, how each feature behaves. Each tier obeys the one above it. |
 | Non-negotiable constraints | `.dds/product/constraints.dds.md` | Security, legal, safety, physical rules that no tier, KPI, or business goal overrides. |
 | Protocols | `.dds/meta/` | The constitution and routing (`manifesto.dds.md`), one schema (`schema.dds.md`), a brownfield adoption protocol (`adopt.dds.md`), and write / update / deprecate rules per tier. |
-| Validator | `.dds/meta/scripts/dds.py` | `check` (schema, ids, dependencies, index trees, tombstones, locks), `impact` (dependency graph), `lock` / `unlock`, `tree`. Standard library only. |
+| Validator | `.dds/meta/scripts/dds.py` | `check` (schema, ids, dependency direction and cycles, non-empty active documents, index trees, tombstones, locks; `--staged` for code committed without its document), `impact` (dependency graph), `lock` / `unlock`, `tree`. Standard library only. |
 | Adapters | `templates/adapters/` | `AGENTS.md`, `CLAUDE.md`, an Agent Skill, a Claude Code hook, a git pre-commit hook, a CI job. These are what make an agent read `.dds/` at all. |
 | Examples | `examples/task-tracker/`, `examples/broken/` | A filled repository that passes the strict gate, and a deliberately invalid tree that the validator must reject. |
 
@@ -55,7 +55,7 @@ Follow `.dds/meta/adopt.dds.md`: documents start as `status: draft` (the code is
 
 1. Before changing code, a schema, an API, or documentation, the agent (or you) reads `.dds/meta/manifesto.dds.md` and follows the tier protocol it routes to.
 2. The change lands in code and in the governing document before the commit.
-3. `python .dds/meta/scripts/dds.py check --gate` runs from the git hook, the agent hook, or CI. A failing gate is fixed, not bypassed.
+3. `python .dds/meta/scripts/dds.py check --gate --staged` runs from the git hook and the agent hook (CI runs `check --gate`). Code staged under an `active` document without that document fails the gate; a failing gate is fixed, not bypassed.
 4. Retiring a feature runs `impact <id> --down` for the cascade set, archives the documents leaves-first, and leaves Tombstones in the index trees so nobody searches for a file that no longer exists.
 
 `python .dds/meta/scripts/dds.py --help` lists the commands. `examples/task-tracker/` shows the result of all of this on a small fictional app, including a completed retirement.
@@ -75,9 +75,9 @@ docs/                     human-facing guides: overview and one guide per tier
 ## Status
 
 - Renamed from `documentary-driven-system` on 2026-09-18 (spelling fix; same project, same single maintainer). The old URL redirects.
-- `v1.0.0` is the original release of the idea as prose. The current line is `dds_version: 2.0.0`, unreleased: a single schema, a validator, adapters, and examples. It breaks the 1.0 frontmatter.
+- `v1.0.0` is the original release of the idea as prose. `v2.0.0` (tagged 2026-09-18) introduced the schema, the validator, adapters, and examples and breaks the 1.0 frontmatter. `2.1.0` (current line) makes the gate look at the code: `check --staged`, dependency direction and cycle detection, and non-empty `active` documents.
 - Verified here: the template and the example pass the strict gate; `examples/broken/` reports every expected error; the test suite under `tests/` passes under Git Bash and PowerShell, and in CI on ubuntu and windows with Python 3.8 and 3.x; the Claude Code hook command exits 2 on a failing tree and when no interpreter is found; the git pre-commit blocks under `gate: strict` and warns under `gate: warn` in a real repository; the skill passes `skills-ref validate`.
-- Verified only on paper: the Claude Code hook's `if` pattern match (see `templates/adapters/README.md` for the one-command live check); the Vale rules.
+- Verified only on paper: the Claude Code hook's `if` pattern match (see `templates/adapters/README.md` for the one-command live check); the Vale rules. `check --staged` is verified against a real git index in the tests, not yet in a live Claude Code commit.
 - Cost of one operation: the agent reads the manifesto, one tier's rules, and one protocol, about 16 KB (roughly 4k tokens). The full protocol corpus is 75 KB and is never read at once.
 - Not provided: semantic verification of code against documents. `check` proves structure and consistency; whether the code does what the document says is still a review.
 

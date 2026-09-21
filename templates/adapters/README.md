@@ -7,7 +7,7 @@
 | `AGENTS.md` | repository root | Always-on instructions for agents that read `AGENTS.md` (Codex, Cursor, Copilot, Jules, and others). |
 | `CLAUDE.md` | repository root | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; this file imports it and adds Claude-specific lines. |
 | `skills/dds/` | `.claude/skills/dds/` and/or `.agents/skills/dds/` | The same instructions as an Agent Skill, loaded on demand. Keep the copies identical. |
-| `claude-code/settings.json` | `.claude/settings.json` (merge if one exists) | PreToolUse hook: `dds.py check --gate` runs before `git commit …` and `git -C <path> commit …`; exit 2 blocks the commit. |
+| `claude-code/settings.json` | `.claude/settings.json` (merge if one exists) | PreToolUse hook: `dds.py check --gate --staged` runs before `git commit …`, `git -C <path> commit …`, and `git -c key=value commit …`; exit 2 blocks the commit. |
 | `git/pre-commit` | `.githooks/pre-commit` + `git config core.hooksPath .githooks` | Human gate; honours `gate: strict` / `gate: warn` from `.dds/tree.dds.md`. |
 | `ci/dds-check.yml` | `.github/workflows/dds-check.yml` | Strict gate on pull requests and pushes to `main`. |
 | `vale/` | repository root (optional) | Suggestion-level prose lint for chunk-local referents and header depth. Written against the Vale rule reference, not run here (no Vale binary); validate with `vale sync && vale .dds` before relying on it. |
@@ -34,7 +34,7 @@ Only Claude Code has a pre-tool hook here. Codex, Cursor, Copilot and Gemini CLI
 
 ## Verifying the Claude Code hook
 
-The hook's `if` patterns (`Bash(git commit*)`, `Bash(git -C * commit*)`) follow the permission-rule glob syntax in the Claude Code hooks reference; they were checked against that reference, not observed live. Verify once per repository: start a Claude Code session in the repository, ask it to run `git commit --dry-run --allow-empty -m test`, and confirm the transcript shows the gate output. Forms outside those two patterns (for example a commit issued through a script) bypass the agent hook and are caught by the git hook and CI.
+The hook's `if` patterns (`Bash(git commit*)`, `Bash(git -C * commit*)`, `Bash(git -c * commit*)`) follow the permission-rule glob syntax in the Claude Code hooks reference; they were checked against that reference, not observed live. Verify once per repository: start a Claude Code session in the repository, ask it to run `git commit --dry-run --allow-empty -m test`, and confirm the transcript shows the gate output. Forms outside those two patterns (for example a commit issued through a script) bypass the agent hook and are caught by the git hook and CI.
 
 ## Windows
 

@@ -1,5 +1,4 @@
 gate: strict requires an active product-constraints
-subtree pointer architecture/ expects
 dds_version 2.0.0 does not match manifesto 1.5.0
 tombstone target .dds/archive/product/old-goal.dds.md is not status: deprecated
 documents under .dds/archive/ must have status: deprecated
@@ -28,3 +27,10 @@ indented frontmatter line 'nested: value' (nested maps are forbidden)
 duplicate frontmatter key type
 stray.dds.md: module documents must live in a sub-folder of .dds/modules/ (STRICT_FOLDERIZATION)
 auth.tree.dds.md: invalid tree line '> ⚠️ DEPRECATED: banner in a live tree
+core-db.dds.md: depends on a lower tier: a architecture document may not depend on 'modules-stray' (module)
+dependency cycle: architecture-core-db -> modules-stray -> architecture-core-db
+core-db.dds.md: active document has an empty section [2]
+login.dds.md: active document is missing section [1] (write template)
+login.dds.md: sources glob 'src/auth/**' matches no file in the repository
+vision.dds.md: active document is missing section [1] (write template)
+subtree pointer nowhere/ expects

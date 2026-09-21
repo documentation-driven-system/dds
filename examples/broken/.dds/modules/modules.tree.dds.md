@@ -12,3 +12,4 @@ description: Modules index (does not point to orphan/).
 - [auth/]: Auth domain.
 - [auth/]: Auth domain, pointed at twice.
 - [stray.dds.md]: Module document sitting in the modules root.
+- [nowhere/]: Points at a folder that has no tree file.

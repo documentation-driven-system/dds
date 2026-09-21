@@ -29,6 +29,7 @@ The Modules tier is the "How": one document per logical feature (Login, Create T
 - **Reverse documentation.** A code change is translated into a rule, not pasted: "Added `if (user.age < 18) return false`" becomes "The system MUST block authentication for users under 18." The rule survives a rewrite of the code; the snippet does not.
 - **Cross-domain integrity.** If the change alters a data model or a global API contract, the architecture document is updated too; the module tier cannot carry that change alone.
 - Append a changelog line (ten entries, older ones in `git log`); if `locking: on`, lock and unlock through `dds.py`.
+- **Stage the document with the code.** The commit hooks run `check --gate --staged`: code staged under an `active` document's `sources:` without that document staged fails the gate. There is no bypass; a human under `gate: warn` decides, and a `DDS-No-Doc:` trailer only records that decision.
 
 ### C. Retiring (`deprecate.dds.md`)
 
