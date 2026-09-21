@@ -70,7 +70,7 @@ description: [One sentence, reused by the index tree.]
 </user_stories>
 ```
 
-`dependencies` stays empty: the `product` tier is the top of the Truth Hierarchy. `description` is the sentence the index tree shows.
+`dependencies` is empty for a global document and may name other `product` ids for an epic that refines them (e.g., `[product-vision]`); a `product` document never depends on `architecture` or `module` documents (`schema.dds.md` [1]). `description` is the sentence the index tree shows.
 
 **CONSTRAINTS_TEMPLATE** (for `.dds/product/constraints.dds.md`, id `product-constraints`): keep sections [0] and [2] of the template above, and replace [1] and [3] with one `## [1] CONSTRAINTS` section holding a `<constraints>` list. Each entry reads `- **C<n> <Short name> (<security | legal | compliance | safety | physical>):** The system MUST ... Source: <law, standard, contract, or policy>.` Section [2] states `None. Constraints are rules, not targets.`
 
@@ -102,6 +102,7 @@ AFTER generating the document and BEFORE saving, EXECUTOR MUST perform a self-au
 1. **Scan for Tech-Agnosticism:** Does the text contain coding frameworks, DB schema names, or API endpoint routes? -> IF YES, rewrite into abstract business requirements.
 2. **Scan for Referents:** Does any pronoun refer to a subject named outside its section? -> IF YES, name the subject in that section.
 3. **Scan for KPIs:** Are the goals measurable? -> IF NO, refine the KPIs.
+4. **Scan for empty sections:** Does every required section hold content? -> IF NO, the document stays `draft`; `check` rejects an `active` document with a missing or empty section.
 
 **FINAL_CHECK:** RUN `python .dds/meta/scripts/dds.py check` on the saved files. IF it fails, fix the reported errors.
 

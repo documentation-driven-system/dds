@@ -101,6 +101,7 @@ AFTER generating the document and BEFORE saving, EXECUTOR MUST perform a self-au
 1. **Scan for Feature Logic:** Does the text explain *how* a specific UI button or algorithmic function works? -> IF YES, remove it. Feature logic belongs in the `modules` tier.
 2. **Scan for Exact Typing:** Are database columns defined with explicit data types? -> IF NO, refine them.
 3. **Scan for Header Depth:** Are there `####` headers? -> IF YES, flatten to `###` and use lists.
+4. **Scan for empty sections:** Does every required section hold content? -> IF NO, the document stays `draft`; `check` rejects an `active` document with a missing or empty section.
 
 **FINAL_CHECK:** RUN `python .dds/meta/scripts/dds.py check` on the saved files. IF it fails, fix the reported errors.
 

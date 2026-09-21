@@ -4,7 +4,7 @@ type: tree
 status: active
 dependencies: []
 last_updated: 2026-09-18
-dds_version: 2.0.0
+dds_version: 2.1.0
 locking: off
 gate: warn
 description: Master root index of the .dds/ tree; links every domain tree.

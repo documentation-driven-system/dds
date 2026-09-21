@@ -23,7 +23,7 @@ Every `.dds.md` file MUST begin with a YAML block delimited by `---` lines. The 
 | `id` | yes | see [2] | Unique across the whole `.dds/` tree, including `archive/`. ENFORCED |
 | `type` | yes | `product` \| `architecture` \| `module` \| `tree` \| `meta` | ENFORCED |
 | `status` | yes | `draft` \| `active` \| `deprecated` | See [3]. ENFORCED |
-| `dependencies` | yes | `[]` or `[id, id, ...]` | Ids only, never paths. Every id MUST resolve to a document anywhere under `.dds/`, INCLUDING `archive/` (a tombstoned epic still resolves). The only status error: an `active` document depending on a `deprecated` id. ENFORCED |
+| `dependencies` | yes | `[]` or `[id, id, ...]` | Ids only, never paths. Every id MUST resolve to a document anywhere under `.dds/`, INCLUDING `archive/` (a tombstoned epic still resolves). Dependencies point UPWARD only: `product` → `product`; `architecture` → `product`, `architecture`; `module` → any tier; `meta` → `meta`; trees declare none. The graph MUST be acyclic. The only status error: an `active` document depending on a `deprecated` id. ENFORCED |
 | `last_updated` | yes | `YYYY-MM-DD` | ENFORCED |
 | `description` | recommended | one sentence | Shown by index trees and tooling. |
 | `sources` | optional, `module` only | `[glob, glob]` relative to repo root | Code paths this document governs. Enables `check --coverage` and `check --sync`. |
@@ -54,7 +54,7 @@ List values that start with `*` MUST be quoted (`sources: ["**/*.ts", src/auth/*
 ## [3] STATUS_SEMANTICS
 
 - `draft`: the document exists but is NOT authoritative. While a document is `draft`, the code is the reference and the document adapts to it. Used during adoption (`adopt.dds.md`) and for reverse-documented modules awaiting human review.
-- `active`: authoritative. If code contradicts an `active` document, the code is a defect (manifesto [1].1).
+- `active`: authoritative. If code contradicts an `active` document, the code is a defect (manifesto [1].1). An `active` document has every required section of its tier template present and non-empty (`## [0]`–`## [3]` for product and architecture, `## [0]`–`## [2]` for modules and for `product-constraints`; a section with only a bare `<tag>` line counts as empty) and, for modules, every `sources:` glob matching at least one file in the repository. ENFORCED (`draft` documents receive warnings instead)
 - `deprecated`: archived under `.dds/archive/`, kept for history and Tombstone resolution. An `active` document MUST NOT list a `deprecated` id in `dependencies`. ENFORCED
 
 ## [4] TREE_LINE_GRAMMAR

@@ -3,7 +3,10 @@
 
 Command surface (frozen; see .dds/meta/manifesto.dds.md [4]):
 
-  check [--gate] [--coverage] [--sync]   validate the whole .dds/ tree against schema.dds.md
+  check [--gate] [--staged] [--coverage] [--sync]
+                                         validate the whole .dds/ tree against schema.dds.md;
+                                         --staged: staged code under an active document's sources
+                                         requires that document to be staged too (error in gate mode)
   impact <id> [--up | --down]            dependency graph queries
   lock <file> --by <executor_id>         acquire a 40-minute lock (locking: on only)
   unlock <file>                          release a lock
@@ -26,7 +29,7 @@ from collections import Counter, deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-DDS_VERSION = "2.0.0"
+DDS_VERSION = "2.1.0"
 LOCK_TIMEOUT_MIN = 40
 CHANGELOG_CAP = 10
 MAX_HEADER_DEPTH = 3
@@ -36,6 +39,9 @@ STATUSES = {"draft", "active", "deprecated"}
 PREFIX = {"product": "product-", "architecture": "architecture-", "module": "modules-",
           "tree": "tree-", "meta": "meta-"}
 REQUIRED = ("id", "type", "status", "dependencies", "last_updated")
+TIER_RANK = {"product": 0, "architecture": 1, "module": 2}          # dependencies point upward (lower rank)
+REQUIRED_SECTIONS = {"product": (0, 1, 2, 3), "architecture": (0, 1, 2, 3), "module": (0, 1, 2)}
+CONSTRAINTS_SECTIONS = (0, 1, 2)                                     # the constraints variant of the product template
 ALLOWED = set(REQUIRED) | {"description", "sources", "locked_by", "locked_at", "deprecated_date",
                            "original_path", "dds_version", "locking", "gate"}
 RESERVED_PREFIX = "product-constraint"
@@ -51,6 +57,8 @@ KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$")
 ENTRY_RE = re.compile(r"^- \[([^\]]+)\]: (.+)$")
 TOMB_RE = re.compile(r"^- \[DEPRECATED -> ([^\]]+)\]: (.+)$")
 BANNER_RE = re.compile(r"^> .*DEPRECATED", re.M)
+SECTION_RE = re.compile(r"^## \[(\d)\]")
+BARE_TAG_RE = re.compile(r"^</?[A-Za-z_]+>$")
 
 CODE_EXT = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".cs", ".java", ".kt", ".go", ".rs",
             ".rb", ".php", ".swift", ".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".scala", ".sql", ".vue",
@@ -248,8 +256,60 @@ def body_headers_and_changelog(doc):
     return depth, entries
 
 
+def check_content(doc, report, all_files):
+    """schema.dds.md [3]: an active document has every required section non-empty and every sources glob
+    matching at least one file; a draft gets warnings instead. Deprecated documents are history and are skipped."""
+    fm, t = doc.fm, doc.type
+    say = report.error if doc.status == "active" else report.warn
+    required = CONSTRAINTS_SECTIONS if (t == "product" and str(fm.get("id", "")).startswith(RESERVED_PREFIX)) else REQUIRED_SECTIONS[t]
+    sections, current, in_fence = {}, None, False
+    for ln in doc.body.split(doc.eol):
+        s = ln.rstrip()
+        if s.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = SECTION_RE.match(s)
+        if m:
+            current = int(m.group(1))
+            sections.setdefault(current, 0)
+            continue
+        if s.startswith("## ") or s.startswith("# "):
+            current = None
+            continue
+        if current is not None and s.strip() and not BARE_TAG_RE.match(s.strip()):
+            sections[current] += 1
+    for n in required:
+        if n not in sections:
+            say(doc.rel, "%s document is missing section [%d] (write template)" % (doc.status, n))
+        elif sections[n] == 0:
+            say(doc.rel, "%s document has an empty section [%d]" % (doc.status, n))
+    if t == "module" and isinstance(fm.get("sources"), list):
+        for g in fm["sources"]:
+            if g and not any(glob_to_regex(g).match(f) for f in all_files):
+                say(doc.rel, "sources glob %r matches no file in the repository" % g)
+
+
+def is_code_path(rel_path):
+    """A code file by extension, outside skipped and hidden directories (the same set iter_code_files walks)."""
+    parts = rel_path.split("/")
+    if any(part in SKIP_DIRS or part.startswith(".") for part in parts[:-1]):
+        return False
+    return Path(parts[-1]).suffix.lower() in CODE_EXT
+
+
+def iter_all_files(root):
+    """Every file under root except skipped and hidden directories; used to resolve sources globs."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
+        for fn in filenames:
+            yield Path(dirpath, fn).relative_to(root).as_posix()
+
+
 def validate_docs(docs, all_docs, root, report, gate=False):
     root_tree = docs.get("tree-root")
+    all_files = None
     for doc in all_docs:
         fm = doc.fm
         if not fm and not doc.lines:
@@ -282,8 +342,19 @@ def validate_docs(docs, all_docs, root, report, gate=False):
         for dep in deps:
             if dep not in docs:
                 report.error(w, "dependency %r does not resolve to any document (ids, not paths)" % dep)
-            elif s == "active" and docs[dep].status == "deprecated":
+                continue
+            if s == "active" and docs[dep].status == "deprecated":
                 report.error(w, "active document depends on deprecated id %r" % dep)
+            dt = docs[dep].type
+            if t in TIER_RANK:
+                if dt not in TIER_RANK:
+                    report.error(w, "dependency %r is a %s document; tier documents depend only on tier documents" % (dep, dt))
+                elif TIER_RANK[dt] > TIER_RANK[t]:
+                    report.error(w, "depends on a lower tier: a %s document may not depend on %r (%s); dependencies point upward (schema.dds.md [1])" % (t, dep, dt))
+            elif t == "meta" and dt != "meta":
+                report.error(w, "meta documents depend only on meta documents, not %r" % dep)
+        if t == "tree" and deps:
+            report.error(w, "tree documents declare no dependencies")
         if t in ("product", "architecture", "module") and not fm.get("description"):
             report.warn(w, "description is missing (index trees and tooling show it)")
         if "sources" in fm:
@@ -291,6 +362,10 @@ def validate_docs(docs, all_docs, root, report, gate=False):
                 report.error(w, "sources is allowed on module documents only")
             elif not isinstance(fm["sources"], list) or not fm["sources"]:
                 report.error(w, "sources must be a non-empty list of globs")
+        if t in REQUIRED_SECTIONS and s in ("active", "draft") and not doc.is_archived:
+            if all_files is None:
+                all_files = list(iter_all_files(root))
+            check_content(doc, report, all_files)
         has_by, has_at = "locked_by" in fm, "locked_at" in fm
         if has_by != has_at:
             report.error(w, "locked_by and locked_at must appear together")
@@ -340,6 +415,35 @@ def validate_docs(docs, all_docs, root, report, gate=False):
             report.warn(w, "header depth %d exceeds the H%d convention" % (depth, MAX_HEADER_DEPTH))
         if entries > CHANGELOG_CAP:
             report.warn(w, "changelog has %d entries; trim to %d (older entries stay in git log)" % (entries, CHANGELOG_CAP))
+
+    # dependency graph must be acyclic
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {i: WHITE for i in docs}
+    for start in sorted(docs):
+        if color[start] != WHITE:
+            continue
+        stack = [(start, iter(docs[start].fm.get("dependencies", []) if isinstance(docs[start].fm.get("dependencies"), list) else []))]
+        color[start] = GRAY
+        path = [start]
+        while stack:
+            node, it = stack[-1]
+            nxt = next(it, None)
+            if nxt is None:
+                color[node] = BLACK
+                stack.pop()
+                path.pop()
+                continue
+            if nxt not in docs:
+                continue
+            if color[nxt] == GRAY:
+                cycle = path[path.index(nxt):] + [nxt]
+                report.error(docs[nxt].rel, "dependency cycle: %s" % " -> ".join(cycle))
+                color[nxt] = BLACK          # report each cycle once
+            elif color[nxt] == WHITE:
+                color[nxt] = GRAY
+                path.append(nxt)
+                deps_n = docs[nxt].fm.get("dependencies", [])
+                stack.append((nxt, iter(deps_n if isinstance(deps_n, list) else [])))
 
     # cross-document rules
     manifesto = docs.get("meta-manifesto")
@@ -529,6 +633,50 @@ def git_changed_paths(root):
     return changed
 
 
+def git_staged_paths(root):
+    """Paths staged in the git index, relative to root; None when git or the index is unavailable."""
+    try:
+        out = subprocess.run(["git", "-C", str(root), "diff", "--cached", "--name-only", "-z"],
+                             capture_output=True, check=True).stdout.decode("utf-8", "replace")
+        prefix = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-prefix"],
+                                capture_output=True, check=True).stdout.decode("utf-8", "replace").strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {p[len(prefix):] for p in out.split("\0") if p and p.startswith(prefix)}
+
+
+def check_staged(root, docs, report, gate):
+    """manifesto [1].3: staged code under an active document's sources requires that document to be staged too.
+    Error in gate mode (agents, CI-less commits), warning otherwise. There is no bypass at the gate; humans
+    under gate: warn are let through by their hook, and the DDS-No-Doc trailer is a CI-era check, not a switch."""
+    staged = git_staged_paths(root)
+    if staged is None:
+        report.info("staged", "git index unavailable; staged check skipped")
+        return
+    if not staged:
+        report.info("staged", "nothing is staged")
+        return
+    globs = module_globs(docs)
+    for d, rxs in globs:
+        if d.status != "active":
+            continue
+        hits = sorted(p for p in staged if any(rx.match(p) for rx in rxs))
+        if hits and d.rel not in staged:
+            (report.error if gate else report.warn)(
+                d.rel, "staged code under sources (%s%s) without this document; stage the governing document in the same commit (manifesto [1].3)"
+                % (", ".join(hits[:3]), "..." if len(hits) > 3 else ""))
+    # adopt.dds.md [4]: code that no module document governs is not changed before a draft document exists.
+    # Skipped when the repository has no module documents at all (nothing to govern yet, e.g. the DDS repo itself).
+    if globs:
+        governed = [rx for d, rxs in globs if d.status != "deprecated" for rx in rxs]
+        for p in sorted(staged):
+            if not is_code_path(p):
+                continue
+            if not any(rx.match(p) for rx in governed):
+                (report.error if gate else report.warn)(
+                    p, "staged code that no module document governs; create a draft document first (adopt.dds.md [2].3)")
+
+
 def check_sync(root, docs, report):
     changed = git_changed_paths(root)
     if changed is None:
@@ -553,6 +701,8 @@ def cmd_check(args):
     docs, all_docs = load_docs(root, report)
     validate_docs(docs, all_docs, root, report, gate=args.gate)
     validate_trees(docs, all_docs, root, report)
+    if args.staged:
+        check_staged(root, docs, report, args.gate)
     if args.coverage:
         check_coverage(root, docs, report)
     if args.sync:
@@ -745,7 +895,8 @@ def main(argv=None):
     p.add_argument("--root", help="directory containing .dds/ (default: nearest ancestor of cwd)")
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check", help="validate the .dds/ tree")
-    c.add_argument("--gate", action="store_true", help="commit-gate mode: present locks are errors")
+    c.add_argument("--gate", action="store_true", help="commit-gate mode: present locks and staged-code violations are errors")
+    c.add_argument("--staged", action="store_true", help="staged code under an active document's sources requires that document to be staged too")
     c.add_argument("--coverage", action="store_true", help="report code files not governed by module sources:")
     c.add_argument("--sync", action="store_true", help="warn when sources changed but the document did not")
     c.set_defaults(fn=cmd_check)

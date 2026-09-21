@@ -8,13 +8,19 @@
             "type": "command",
             "if": "Bash(git commit*)",
             "timeout": 120,
-            "command": "PY=\"${DDS_PYTHON:-$(command -v python || command -v python3)}\"; [ -n \"$PY\" ] || { echo \"DDS gate: python not found on PATH; install Python 3.8+ or set DDS_PYTHON.\" >&2; exit 2; }; \"$PY\" \"${CLAUDE_PROJECT_DIR}/.dds/meta/scripts/dds.py\" --root \"${CLAUDE_PROJECT_DIR}\" check --gate || { echo \"DDS gate: clear the ERROR lines above, then commit again (.dds/meta/manifesto.dds.md [1].3).\" >&2; exit 2; }"
+            "command": "PY=\"${DDS_PYTHON:-$(command -v python || command -v python3)}\"; [ -n \"$PY\" ] || { echo \"DDS gate: python not found on PATH; install Python 3.8+ or set DDS_PYTHON.\" >&2; exit 2; }; \"$PY\" \"${CLAUDE_PROJECT_DIR}/.dds/meta/scripts/dds.py\" --root \"${CLAUDE_PROJECT_DIR}\" check --gate --staged || { echo \"DDS gate: clear the ERROR lines above, then commit again (.dds/meta/manifesto.dds.md [1].3).\" >&2; exit 2; }"
           },
           {
             "type": "command",
             "if": "Bash(git -C * commit*)",
             "timeout": 120,
-            "command": "PY=\"${DDS_PYTHON:-$(command -v python || command -v python3)}\"; [ -n \"$PY\" ] || { echo \"DDS gate: python not found on PATH; install Python 3.8+ or set DDS_PYTHON.\" >&2; exit 2; }; \"$PY\" \"${CLAUDE_PROJECT_DIR}/.dds/meta/scripts/dds.py\" --root \"${CLAUDE_PROJECT_DIR}\" check --gate || { echo \"DDS gate: clear the ERROR lines above, then commit again (.dds/meta/manifesto.dds.md [1].3).\" >&2; exit 2; }"
+            "command": "PY=\"${DDS_PYTHON:-$(command -v python || command -v python3)}\"; [ -n \"$PY\" ] || { echo \"DDS gate: python not found on PATH; install Python 3.8+ or set DDS_PYTHON.\" >&2; exit 2; }; \"$PY\" \"${CLAUDE_PROJECT_DIR}/.dds/meta/scripts/dds.py\" --root \"${CLAUDE_PROJECT_DIR}\" check --gate --staged || { echo \"DDS gate: clear the ERROR lines above, then commit again (.dds/meta/manifesto.dds.md [1].3).\" >&2; exit 2; }"
+          },
+          {
+            "type": "command",
+            "if": "Bash(git -c * commit*)",
+            "timeout": 120,
+            "command": "PY=\"${DDS_PYTHON:-$(command -v python || command -v python3)}\"; [ -n \"$PY\" ] || { echo \"DDS gate: python not found on PATH; install Python 3.8+ or set DDS_PYTHON.\" >&2; exit 2; }; \"$PY\" \"${CLAUDE_PROJECT_DIR}/.dds/meta/scripts/dds.py\" --root \"${CLAUDE_PROJECT_DIR}\" check --gate --staged || { echo \"DDS gate: clear the ERROR lines above, then commit again (.dds/meta/manifesto.dds.md [1].3).\" >&2; exit 2; }"
           }
         ]
       }

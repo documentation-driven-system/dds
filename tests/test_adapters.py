@@ -119,10 +119,10 @@ class ClaudeHook(unittest.TestCase):
     def test_shape(self):
         self.assertEqual(self.cfg["hooks"]["PreToolUse"][0]["matcher"], "Bash")
         patterns = {h["if"] for h in self.handlers}
-        self.assertEqual(patterns, {"Bash(git commit*)", "Bash(git -C * commit*)"}, "plain and -C commit forms")
+        self.assertEqual(patterns, {"Bash(git commit*)", "Bash(git -C * commit*)", "Bash(git -c * commit*)"}, "plain, -C and -c commit forms")
         for h in self.handlers:
             self.assertEqual(h["type"], "command")
-            self.assertIn("check --gate", h["command"])
+            self.assertIn("check --gate --staged", h["command"])
             self.assertIn("exit 2", h["command"], "only exit 2 blocks a PreToolUse hook")
             self.assertIn("DDS_PYTHON", h["command"], "interpreter fallback mirrors the git hook")
         self.assertEqual(len({h["command"] for h in self.handlers}), 1, "both forms run the same gate")
@@ -204,6 +204,40 @@ class GitPreCommit(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("gate is 'warn'", proc.stderr)
         self.assertIn("indexed 0 time(s)", proc.stdout + proc.stderr)
+
+    def test_strict_gate_blocks_code_committed_without_its_document(self):
+        """The pre-commit runs --staged: code under an active module document needs that document in the commit."""
+        self._set_gate("strict")
+        (self.tmp / ".dds" / "product" / "constraints.dds.md").write_text(
+            "---\nid: product-constraints\ntype: product\nstatus: active\ndependencies: []\nlast_updated: 2026-09-21\n"
+            "description: Constraints.\n---\n\n# PRODUCT: Constraints\n\n## [0] BUSINESS_VISION_AND_VALUE\nProtect users.\n\n"
+            "## [1] CONSTRAINTS\n<constraints>\n- **C1 (security):** The system MUST hash passwords. Source: SEC-1.\n</constraints>\n\n"
+            "## [2] KEY_PERFORMANCE_INDICATORS (KPIs)\nNone.\n", encoding="utf-8")
+        ptree = self.tmp / ".dds" / "product" / "product.tree.dds.md"
+        ptree.write_text(ptree.read_text(encoding="utf-8").replace(
+            "<!-- No documents yet. Entries are appended by dds.product/write.dds.md [4]. -->", "- [constraints.dds.md]: Constraints."), encoding="utf-8")
+        (self.tmp / "src" / "auth").mkdir(parents=True)
+        (self.tmp / "src" / "auth" / "login.py").write_text("def login(): pass\n", encoding="utf-8")
+        mod = self.tmp / ".dds" / "modules" / "auth"
+        mod.mkdir()
+        (mod / "auth.tree.dds.md").write_text(
+            "---\nid: tree-modules-auth\ntype: tree\nstatus: active\ndependencies: []\nlast_updated: 2026-09-21\n"
+            "description: Auth index.\n---\n\n# AUTH_TREE\n\n- [login.dds.md]: Login flow.\n", encoding="utf-8")
+        (mod / "login.dds.md").write_text(
+            "---\nid: modules-auth-login\ntype: module\nstatus: active\ndependencies: []\nsources: [src/auth/**]\n"
+            "last_updated: 2026-09-21\ndescription: Login flow.\n---\n\n# AUTH: Login\n\n## [0] CONTEXT_AND_PURPOSE\nThe handler logs users in.\n\n"
+            "## [1] TECHNICAL_CONSTRAINTS\n<constraints>\n- The handler MUST hash passwords.\n</constraints>\n\n## [2] LOGIC_FLOW\n1. Verify.\n", encoding="utf-8")
+        mtree = self.tmp / ".dds" / "modules" / "modules.tree.dds.md"
+        mtree.write_text(mtree.read_text(encoding="utf-8").replace(
+            "<!-- No documents yet. Domain folders are registered by dds.modules/write.dds.md [4]. -->", "- [auth/]: Auth domain."), encoding="utf-8")
+        self._git("add", "-A")
+        proc = self._git("commit", "-q", "-m", "governed baseline")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        (self.tmp / "src" / "auth" / "login.py").write_text("def login(): return True\n", encoding="utf-8")
+        self._git("add", "-A")
+        proc = self._git("commit", "-q", "-m", "code only")
+        self.assertNotEqual(proc.returncode, 0, "strict gate must block code committed without its document")
+        self.assertIn("staged code under sources (src/auth/login.py) without this document", proc.stdout + proc.stderr)
 
     def test_strict_gate_blocks_a_failing_commit(self):
         self._set_gate("strict")

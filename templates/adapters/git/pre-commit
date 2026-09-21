@@ -16,7 +16,7 @@ PY="${DDS_PYTHON:-python}"
 command -v "$PY" >/dev/null 2>&1 || PY=python3
 command -v "$PY" >/dev/null 2>&1 || { echo "DDS: python not found; set DDS_PYTHON" >&2; exit 1; }
 
-if "$PY" "$ROOT/.dds/meta/scripts/dds.py" --root "$ROOT" check --gate; then
+if "$PY" "$ROOT/.dds/meta/scripts/dds.py" --root "$ROOT" check --gate --staged; then
   exit 0
 fi
 

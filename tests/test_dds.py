@@ -8,6 +8,7 @@ the negative fixture is examples/broken/ with its EXPECTED*.txt files.
 """
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -167,6 +168,133 @@ class LockLifecycle(unittest.TestCase):
         self.assertNotIn("locked_by", self.target.read_text(encoding="utf-8"))
 
 
+class StagedGate(unittest.TestCase):
+    """check --staged: code staged under an active document's sources requires that document to be staged too."""
+
+    def setUp(self):
+        self.git = shutil.which("git")
+        if not self.git:
+            self.skipTest("git not available")
+        self.tmp = Path(tempfile.mkdtemp(prefix="dds-staged-"))
+        shutil.copytree(REPO / "examples" / "task-tracker", self.tmp / "tt", ignore=shutil.ignore_patterns(".locks", "__pycache__"))
+        self.root = self.tmp / "tt"
+        self._git("init", "-q"); self._git("config", "core.autocrlf", "false")
+        self._git("config", "user.email", "t@t"); self._git("config", "user.name", "t")
+        self._git("add", "-A"); self._git("commit", "-q", "-m", "base")
+        self.code = self.root / "src" / "tasks" / "complete.py"
+        self.doc = self.root / ".dds" / "modules" / "tasks" / "complete-task.dds.md"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _git(self, *args):
+        return subprocess.run([self.git] + list(args), cwd=str(self.root), capture_output=True, text=True, encoding="utf-8")
+
+    def _touch(self, path, marker):
+        path.write_text(path.read_text(encoding="utf-8") + "\n" + marker + "\n", encoding="utf-8")
+
+    def test_code_without_its_document_fails_in_gate_mode_and_warns_otherwise(self):
+        self._touch(self.code, "REOPEN_WINDOW_HOURS = 48  # behaviour change")
+        self._git("add", "-A")
+        code, out = run("check", "--gate", "--staged", root=self.root)
+        self.assertEqual(code, 1, out)
+        self.assertIn("ERROR: .dds/modules/tasks/complete-task.dds.md: staged code under sources (src/tasks/complete.py) without this document", out)
+        code, out = run("check", "--staged", root=self.root)
+        self.assertEqual(code, 0, "without --gate the staged rule is a warning:\n" + out)
+        self.assertIn("WARN: .dds/modules/tasks/complete-task.dds.md: staged code under sources", out)
+
+    def test_code_with_its_document_passes(self):
+        self._touch(self.code, "REOPEN_WINDOW_HOURS = 48")
+        self._touch(self.doc, "- [2026-09-21]: Reopen window widened to 48 hours.")
+        self._git("add", "-A")
+        code, out = run("check", "--gate", "--staged", root=self.root)
+        self.assertEqual(code, 0, out)
+        self.assertIn("RESULT: PASS", out)
+
+    def test_nothing_staged_is_information_only(self):
+        code, out = run("check", "--gate", "--staged", root=self.root)
+        self.assertEqual(code, 0, out)
+        self.assertIn("INFO: staged: nothing is staged", out)
+
+    def test_new_code_that_no_document_governs_is_gated_until_a_draft_exists(self):
+        billing = self.root / "src" / "billing"
+        billing.mkdir()
+        (billing / "invoice.py").write_text("def invoice(): pass\n", encoding="utf-8")
+        self._git("add", "-A")
+        code, out = run("check", "--gate", "--staged", root=self.root)
+        self.assertEqual(code, 1, out)
+        self.assertIn("ERROR: src/billing/invoice.py: staged code that no module document governs; create a draft document first (adopt.dds.md [2].3)", out)
+        mod = self.root / ".dds" / "modules" / "billing"
+        mod.mkdir()
+        (mod / "billing.tree.dds.md").write_text(
+            "---\nid: tree-modules-billing\ntype: tree\nstatus: active\ndependencies: []\nlast_updated: 2026-09-21\n"
+            "description: Billing index.\n---\n\n# BILLING_TREE\n\n- [invoice.dds.md]: Invoicing, reverse-documented draft.\n", encoding="utf-8")
+        (mod / "invoice.dds.md").write_text(
+            "---\nid: modules-billing-invoice\ntype: module\nstatus: draft\ndependencies: []\nsources: [src/billing/**]\n"
+            "last_updated: 2026-09-21\ndescription: Invoicing, reverse-documented from src/billing.\n---\n\n# BILLING: Invoice\n\n"
+            "## [0] CONTEXT_AND_PURPOSE\nDocumented from code; not yet reviewed.\n", encoding="utf-8")
+        mtree = self.root / ".dds" / "modules" / "modules.tree.dds.md"
+        mtree.write_text(mtree.read_text(encoding="utf-8") + "- [billing/]: Invoicing.\n", encoding="utf-8")
+        self._git("add", "-A")
+        code, out = run("check", "--gate", "--staged", root=self.root)
+        self.assertEqual(code, 0, "a draft document covering the new code opens the gate:\n" + out)
+
+    def test_draft_documents_do_not_gate_their_code(self):
+        self.doc.write_text(self.doc.read_text(encoding="utf-8").replace("status: active", "status: draft", 1), encoding="utf-8")
+        self._git("add", "-A"); self._git("commit", "-q", "-m", "draft")
+        self._touch(self.code, "REOPEN_WINDOW_HOURS = 48")
+        self._git("add", "-A")
+        code, out = run("check", "--gate", "--staged", root=self.root)
+        self.assertEqual(code, 0, "a draft document is not authoritative, so its code is not gated:\n" + out)
+        self.assertNotIn("staged code under sources", out)
+
+
+class Hierarchy(unittest.TestCase):
+    """Dependencies point upward and the graph is acyclic; the example copy is the fixture."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="dds-hier-"))
+        shutil.copytree(REPO / "examples" / "task-tracker", self.tmp / "tt", ignore=shutil.ignore_patterns(".locks", "__pycache__"))
+        self.root = self.tmp / "tt"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _set_deps(self, rel, deps):
+        p = self.root / rel
+        text = re.sub(r"^dependencies: .*$", "dependencies: %s" % deps, p.read_text(encoding="utf-8"), count=1, flags=re.M)
+        p.write_text(text, encoding="utf-8")
+
+    def test_product_depending_on_a_module_is_rejected_as_reversed_and_cyclic(self):
+        self._set_deps(".dds/product/vision.dds.md", "[architecture-tech-stack]")   # tech-stack already depends on vision
+        code, out = run("check", "--gate", root=self.root)
+        self.assertEqual(code, 1, out)
+        self.assertIn("depends on a lower tier: a product document may not depend on 'architecture-tech-stack' (architecture)", out)
+        self.assertIn("dependency cycle: architecture-tech-stack -> product-vision -> architecture-tech-stack", out)
+
+    def test_product_depending_on_product_is_allowed(self):
+        self._set_deps(".dds/product/epics/task-management/task-management.dds.md", "[product-vision]")
+        code, out = run("check", "--gate", root=self.root)
+        self.assertEqual(code, 0, out)
+
+    def test_empty_active_module_with_unmatched_sources_is_rejected(self):
+        mod = self.root / ".dds" / "modules" / "tasks" / "empty.dds.md"
+        mod.write_text("---\nid: modules-tasks-empty\ntype: module\nstatus: active\ndependencies: []\n"
+                       "sources: [src/does-not-exist/**]\nlast_updated: 2026-09-21\ndescription: Empty on purpose.\n---\n\n# TASKS: Empty\n",
+                       encoding="utf-8")
+        tree = self.root / ".dds" / "modules" / "tasks" / "tasks.tree.dds.md"
+        tree.write_text(tree.read_text(encoding="utf-8") + "- [empty.dds.md]: Empty on purpose.\n", encoding="utf-8")
+        code, out = run("check", "--gate", root=self.root)
+        self.assertEqual(code, 1, out)
+        for msg in ("active document is missing section [0]", "active document is missing section [1]",
+                    "active document is missing section [2]", "sources glob 'src/does-not-exist/**' matches no file"):
+            self.assertIn(msg, out)
+        mod.write_text(mod.read_text(encoding="utf-8").replace("status: active", "status: draft", 1), encoding="utf-8")
+        code, out = run("check", "--gate", root=self.root)
+        self.assertEqual(code, 0, "the same document as a draft only warns:\n" + out)
+        self.assertIn("WARN: .dds/modules/tasks/empty.dds.md: draft document is missing section [1]", out)
+
+
 class GlobTranslation(unittest.TestCase):
     def test_globs(self):
         dds = load_module()
@@ -204,7 +332,10 @@ class SyncAndCoverage(unittest.TestCase):
             "description: Auth index.\n---\n\n# AUTH_TREE\n\n- [login.dds.md]: Login flow.\n", encoding="utf-8")
         (mod / "login.dds.md").write_text(
             "---\nid: modules-auth-login\ntype: module\nstatus: active\ndependencies: []\nsources: [src/auth/**]\n"
-            "last_updated: 2026-09-18\ndescription: Login flow.\n---\n\n# AUTH: Login\n\nText.\n", encoding="utf-8")
+            "last_updated: 2026-09-18\ndescription: Login flow.\n---\n\n# AUTH: Login\n\n"
+            "## [0] CONTEXT_AND_PURPOSE\nThe login handler issues sessions.\n\n"
+            "## [1] TECHNICAL_CONSTRAINTS\n<constraints>\n- The handler MUST hash passwords.\n</constraints>\n\n"
+            "## [2] LOGIC_FLOW\n1. The handler verifies the password.\n", encoding="utf-8")
         mt = self.tmp / ".dds" / "modules" / "modules.tree.dds.md"
         mt.write_text(mt.read_text(encoding="utf-8") + "\n- [auth/]: Auth domain.\n", encoding="utf-8")
 
